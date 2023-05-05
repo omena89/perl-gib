@@ -9,8 +9,6 @@ use warnings;
 use Moose;
 use MooseX::Types::Path::Tiny qw(AbsFile);
 
-use English qw(-no_match_vars);
-use Carp qw(croak);
 use Mojo::Template;
 use Path::Tiny;
 
@@ -95,7 +93,7 @@ sub render {
         $title = $self->content->package->statement;
     }
     else {
-        $title = $self->content->library_name;
+        $title = $self->content->config->library_name;
     }
 
     return Mojo::Template->new()->vars(1)->render(

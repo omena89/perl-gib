@@ -11,6 +11,7 @@ use warnings;
 
 use Moose::Role;
 
+use Carp qw(croak);
 use Readonly;
 use Try::Tiny;
 
@@ -72,15 +73,25 @@ sub _build_attributes {
                 @fragment = reverse @fragment;
 
                 my $attribute = try {
-                    Perl::Gib::Item::Attribute->new(
-                        fragment               => \@fragment,
-                        document_private_items => $self->document_private_items,
-                        document_ignored_items => $self->document_ignored_items
-                    );
+                    Perl::Gib::Item::Attribute->new( fragment => \@fragment, );
                 }
                 catch {
-                    croak($_)
-                      if ( $_ !~ /ignored by comment/ && $_ !~ /is private/ );
+                    return if ( $_ !~ /is empty/ );
+
+                    for my $exception (
+                        qw(
+                        AttributeIsIgnoredByComment
+                        AttributeIsPrivate
+                        AttributeIsUndocumented
+                        )
+                      )
+                    {
+                        return
+                          if (
+                            $_->isa( 'Perl::Gib::Exception::' . $exception ) );
+                    }
+
+                    croak($_);
                 };
                 last if ( !$attribute );
 
@@ -125,15 +136,25 @@ sub _build_modifiers {
                 @fragment = reverse @fragment;
 
                 my $modifier = try {
-                    Perl::Gib::Item::Modifier->new(
-                        fragment               => \@fragment,
-                        document_private_items => $self->document_private_items,
-                        document_ignored_items => $self->document_ignored_items
-                    );
+                    Perl::Gib::Item::Modifier->new( fragment => \@fragment, );
                 }
                 catch {
-                    croak($_)
-                      if ( $_ !~ /ignored by comment/ && $_ !~ /is private/ );
+                    return if ( $_ !~ /is empty/ );
+
+                    for my $exception (
+                        qw(
+                        ModifierIsIgnoredByComment
+                        ModifierIsPrivate
+                        ModifierIsUndocumented
+                        )
+                      )
+                    {
+                        return
+                          if (
+                            $_->isa( 'Perl::Gib::Exception::' . $exception ) );
+                    }
+
+                    croak($_);
                 };
                 last if ( !$modifier );
 

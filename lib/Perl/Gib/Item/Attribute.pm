@@ -10,7 +10,7 @@ use warnings;
 use Moose;
 with qw(Perl::Gib::Item);
 
-use Carp qw(croak);
+use Perl::Gib::Util qw(throw_exception);
 
 no warnings "uninitialized";
 
@@ -21,9 +21,9 @@ sub _build_statement {
 
     my $fragment = $self->fragment->[0];
 
-    my $name = $fragment->child(1);
-    croak( sprintf "Attribute is private: %s", $name )
-      if ( $name =~ /^['"]_/ && !$self->document_private_items );
+    my $name = $fragment->child(1)->string;
+    throw_exception( 'AttributeIsPrivate', name => $name )
+      if ( $name =~ /^_/ && !$self->config->document_private_items );
 
     my @elements  = $fragment->elements;
     my $statement = join ' ', @elements[ 0, 1 ];
@@ -31,7 +31,7 @@ sub _build_statement {
     return $statement;
 }
 
-### Create item description string by parsing comment block. By default 
+### Create item description string by parsing comment block. By default
 ### attributes starting with a pseudo function `#[ignore(item)]` in comment
 ### block are ignored; the class will croak.
 sub _build_description {
@@ -41,8 +41,9 @@ sub _build_description {
     shift @fragment;
 
     if ( $fragment[0] =~ /#\[ignore\(item\)\]/ ) {
-        croak( sprintf "Attribute ignored by comment: %s", $self->statement )
-          if ( !$self->document_ignored_items );
+        throw_exception( 'AttributeIsIgnoredByComment',
+            name => $self->statement )
+          if ( !$self->config->document_ignored_items );
 
         shift @fragment;
     }
@@ -54,6 +55,9 @@ sub _build_description {
     }
 
     $description =~ s/\s+$//g;
+
+    throw_exception( 'AttributeIsUndocumented', name => $self->statement )
+      if ( $self->config->ignore_undocumented_items && !$description );
 
     return $description;
 }

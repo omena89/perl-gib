@@ -4,8 +4,8 @@
 
 ## Introduction
 
-**perlgib** generates HTML and Markdown documentation and runs tests from Perl
-code comment lines.
+**perlgib** generates HTML, Markdown and Pod documentation and runs tests from
+Perl code comment lines.
 
 ## Installation
 
@@ -53,11 +53,17 @@ following help output.
                 Documentation output path, default doc in current working
                 directory.
 
-        --output-format html|markdown|all
+        --output-format html|markdown|pod|all
                 Documentation output format, default html.
 
         --document-private-items
                 Document private items.
+
+        --document-ignored-items
+                Document ignored items (#[ignore(item)]).
+
+        --ignore-undocumented-items
+                Ignore undocumented items.
 
         --no-html-index
                 Prevent creating of html index.

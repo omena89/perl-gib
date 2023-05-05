@@ -1,8 +1,6 @@
 ## no critic
 use Test::More;
 
-use Try::Tiny;
-
 subtest 'class' => sub {
     use Test::Moose::More;
 
@@ -12,7 +10,7 @@ subtest 'class' => sub {
     is_class_ok($class);
     is_immutable_ok($class);
     check_sugar_ok($class);
-    has_method_ok( $class, qw(to_markdown to_html run_test) );
+    has_method_ok( $class, qw(to_markdown to_html to_pod run_test) );
     has_attribute_ok( $class, 'file' );
 };
 
@@ -35,16 +33,9 @@ subtest 'new' => sub {
 
     throws_ok(
         sub { Perl::Gib::Module->new( file => 'lib/Perl/Gib/Usage.md' ) },
-        qr/Module does not contain package/,
+        'Perl::Gib::Exception::FileIsNotAPerlModule',
         'Not a Perl module.'
     );
-
-    throws_ok(
-        sub { Perl::Gib::Module->new( { file => 'lib/Perl/Gib/Item.pm' } ) },
-        qr/Package \/ Module ignored by comment/,
-        'Package / Module ignored by comment.'
-    );
-
 };
 
 subtest 'documentation' => sub {
@@ -59,10 +50,15 @@ subtest 'documentation' => sub {
     my $html  = $module->to_html();
     my @lines = split /\n/, $html;
     is( $lines[0], '<h1>Perl::Gib::Module</h1>', 'HTML documentation' );
+
+    my $pod   = $module->to_pod();
+    my @lines = split /\n/, $pod;
+    is( $lines[0], '=head1 Perl::Gib::Module', 'POD documentation' );
 };
 
 subtest 'test' => sub {
     use File::Spec;
+    use Try::Tiny;
 
     use Perl::Gib::Module;
 

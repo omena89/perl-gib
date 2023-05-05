@@ -16,13 +16,25 @@ use English qw(-no_match_vars);
 use Mojo::Template;
 use Path::Tiny;
 use PPI;
+use Pod::HTML2Pod;
 use Text::Markdown qw(markdown);
 use Try::Tiny;
 
+use Perl::Gib::Config;
 use Perl::Gib::Item::Package;
 use Perl::Gib::Item::Subroutine;
+use Perl::Gib::Util qw(throw_exception);
 
 no warnings "uninitialized";
+
+### #[ignore(item)]
+### Perl::Gib configuration object. [optional]
+has 'config' => (
+    is       => 'ro',
+    isa      => 'Perl::Gib::Config',
+    default  => sub { Perl::Gib::Config->instance() },
+    init_arg => undef,
+);
 
 ### Path to Perl module file. [required]
 has 'file' => (
@@ -62,20 +74,6 @@ has 'subroutines' => (
     init_arg => undef,
 );
 
-### Document private items. [optional]
-has 'document_private_items' => (
-    is      => 'ro',
-    isa     => 'Bool',
-    default => sub { 0 },
-);
-
-### Document ignored items. [optional]
-has 'document_ignored_items' => (
-    is      => 'ro',
-    isa     => 'Bool',
-    default => sub { 0 },
-);
-
 ### Parse file with PPI and return DOM. Prune empty lines and
 ### [Perl::Critic](https://metacpan.org/pod/Perl::Critic) annotation
 ### comments.
@@ -83,7 +81,8 @@ sub _build_dom {
     my $self = shift;
 
     my $dom = PPI::Document->new( $self->file->canonpath, readonly => 1 );
-    croak( sprintf "Module is empty: %s", $self->file->canonpath ) if ( !$dom );
+    throw_exception( 'ModuleIsEmpty', file => $self->file->canonpath() )
+      if ( !$dom );
     $dom->index_locations();
     $dom->prune('PPI::Token::Whitespace');
     $dom->prune(
@@ -131,14 +130,10 @@ sub _build_package {
         last if ($done);
     }
 
-    croak( sprintf "Module does not contain package: %s", $self->file )
+    throw_exception( 'FileIsNotAPerlModule', file => $self->file->canonpath() )
       if ( !@fragment );
 
-    return Perl::Gib::Item::Package->new(
-        fragment               => \@fragment,
-        document_private_items => $self->document_private_items,
-        document_ignored_items => $self->document_ignored_items,
-    );
+    return Perl::Gib::Item::Package->new( fragment => \@fragment, );
 }
 
 ### Find subroutine statements and belonging comment block in DOM and create
@@ -168,15 +163,23 @@ sub _build_subroutines {
                 @fragment = reverse @fragment;
 
                 my $sub = try {
-                    Perl::Gib::Item::Subroutine->new(
-                        fragment               => \@fragment,
-                        document_private_items => $self->document_private_items,
-                        document_ignored_items => $self->document_ignored_items
-                    );
+                    Perl::Gib::Item::Subroutine->new( fragment => \@fragment, );
                 }
                 catch {
-                    croak($_)
-                      if ( $_ !~ /ignored by comment/ && $_ !~ /is private/ );
+                    for my $exception (
+                        qw(
+                        SubroutineIsIgnoredByComment
+                        SubroutineIsPrivate
+                        SubroutineIsUndocumented
+                        )
+                      )
+                    {
+                        return
+                          if (
+                            $_->isa( 'Perl::Gib::Exception::' . $exception ) );
+                    }
+
+                    croak($_);
                 };
                 last if ( !$sub );
 
@@ -213,7 +216,7 @@ sub BUILD {
         }
     );
 
-    if ( $has_moose ) {
+    if ($has_moose) {
         apply_all_roles( $self, 'Perl::Gib::Module::Moose' );
         $self->attributes;
         $self->modifiers;
@@ -275,6 +278,27 @@ sub to_html {
     return markdown( $self->to_markdown() );
 }
 
+### Provide documentation in Pod.
+###
+### ```
+###     my $module = Perl::Gib::Module->new( { file => 'lib/Perl/Gib/Module.pm' } );
+###
+###     my $pod   = $module->to_pod();
+###     my @lines = split /\n/, $pod;
+###     is( $lines[0], '=head1 Perl::Gib::Module', 'Pod documentation' );
+### ```
+sub to_pod {
+    my $self = shift;
+
+    my $html = $self->to_html;
+
+    # see Pod::HTML2POD 'Use "<h1>" and "<h2>" for headings.'
+    $html =~ s/<h2>/<h1>/gm;
+    $html =~ s/<h3>/<h2>/gm;
+
+    return Pod::HTML2Pod::convert( content => $html, a_href => 1 );
+}
+
 ### Generate and run Perl module test scripts with
 ### [prove](https://metacpan.org/pod/distribution/Test-Harness/bin/prove).
 ### Optional add `$library` to the path for the tests.
@@ -333,7 +357,7 @@ TEMPLATE
     system split / /, $cmd;
     my $rc = $CHILD_ERROR >> 8;
 
-    croak( sprintf "Module '%s' test failed", $self->package->statement )
+    throw_exception( 'ModuleTestFailed', name => $self->package->statement )
       if ($rc);
 
     return;

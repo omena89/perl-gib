@@ -1,6 +1,6 @@
 package Perl::Gib;
 
-##! Generate Perl project HTML documentation and run module test scripts.
+##! Generate Perl project documentation and run module test scripts.
 ##!
 ##!     use Perl::Gib;
 ##!     my $perlgib = Perl::Gib->new();
@@ -14,14 +14,12 @@ use feature qw(state);
 use Moose;
 use MooseX::Types::Path::Tiny qw(AbsPath AbsDir);
 
-use Carp qw(croak carp);
-use English qw(-no_match_vars);
 use File::Copy::Recursive qw(dircopy dirmove);
 use File::Find qw(find);
-use Mojo::Template;
 use Path::Tiny;
 use Try::Tiny;
 
+use Perl::Gib::Config;
 use Perl::Gib::Markdown;
 use Perl::Gib::Module;
 use Perl::Gib::Template;
@@ -32,63 +30,32 @@ our $VERSION = '1.00';
 no warnings "uninitialized";
 
 ### #[ignore(item)]
+### Perl::Gib configuration object.
+has 'config' => (
+    is       => 'ro',
+    isa      => 'Perl::Gib::Config',
+    default  => sub { Perl::Gib::Config->instance() },
+    init_arg => undef,
+);
+
+### #[ignore(item)]
 ### List of processed Perl modules.
 has 'modules' => (
-    is      => 'ro',
-    isa     => 'ArrayRef[Perl::Gib::Module]',
-    lazy    => 1,
-    builder => '_build_modules',
+    is       => 'ro',
+    isa      => 'ArrayRef[Perl::Gib::Module]',
+    lazy     => 1,
+    builder  => '_build_modules',
     init_arg => undef,
 );
 
 ### #[ignore(item)]
 ### List of processed Markdown files.
 has 'markdowns' => (
-    is      => 'ro',
-    isa     => 'ArrayRef[Perl::Gib::Markdown]',
-    lazy    => 1,
-    builder => '_build_markdowns',
+    is       => 'ro',
+    isa      => 'ArrayRef[Perl::Gib::Markdown]',
+    lazy     => 1,
+    builder  => '_build_markdowns',
     init_arg => undef,
-);
-
-### Path to directory with Perl modules and Markdown files. [optional]
-### > Default `lib` in current directory.
-has 'library_path' => (
-    is      => 'ro',
-    isa     => AbsDir,
-    coerce  => 1,
-    default => sub { path('lib')->absolute->realpath; },
-);
-
-### Output path for documentation. [optional]
-### > Default `doc` in current directory.
-has 'output_path' => (
-    is      => 'ro',
-    isa     => AbsPath,
-    coerce  => 1,
-    default => sub { path('doc')->absolute; },
-);
-
-### Document private items. [optional]
-has 'document_private_items' => (
-    is      => 'ro',
-    isa     => 'Bool',
-    default => sub { 0 },
-);
-
-### Library name, used as index header. [optional]
-### > Default `Library.`
-has 'library_name' => (
-    is      => 'ro',
-    isa     => 'Str',
-    default => sub { 'Library' },
-);
-
-### Prevent creating html index. [optional]
-has 'no_html_index' => (
-    is      => 'ro',
-    isa     => 'Bool',
-    default => sub { 0 },
 );
 
 ### #[ignore(item)]
@@ -101,13 +68,6 @@ has 'working_path' => (
     init_arg => undef,
 );
 
-### Document ignored items. [optional]
-has 'document_ignored_items' => (
-    is      => 'ro',
-    isa     => 'Bool',
-    default => sub { 0 },
-);
-
 ### Find Perl modules in given library path and process them. By default
 ### modules with pseudo function `#[ignore(item)]` in package comment block
 ### are ignored.
@@ -116,16 +76,12 @@ sub _build_modules {
 
     my @files;
     find( sub { push @files, $File::Find::name if ( -f and /\.pm$/ ); },
-        $self->library_path );
+        $self->config->library_path );
 
     my @modules;
     foreach my $file (@files) {
         my $module = try {
-            Perl::Gib::Module->new(
-                file                   => $file,
-                document_private_items => $self->document_private_items,
-                document_ignored_items => $self->document_ignored_items,
-            )
+            Perl::Gib::Module->new( file => $file, )
         };
         next if ( !$module );
         push @modules, $module;
@@ -140,7 +96,7 @@ sub _build_markdowns {
 
     my @files;
     find( sub { push @files, $File::Find::name if ( -f and /\.md$/ ); },
-        $self->library_path );
+        $self->config->library_path );
 
     my @documents =
       map { Perl::Gib::Markdown->new( file => $_ ) } @files;
@@ -176,7 +132,6 @@ sub _get_resource_path {
           path( $path, 'templates', 'gib.index.html.ep' ),
         'out:assets'         => path( $self->working_path, 'assets' ),
         'out:index:html'     => path( $self->working_path, 'index.html' ),
-        'out:index:markdown' => path( $self->working_path, 'index.md' ),
     );
     my $resource = $resources{$label};
 
@@ -190,20 +145,24 @@ sub _get_resource_path {
 ###
 ### * html => `.html`
 ### * markdown => `.md`
+### * pod => `.pod`
 sub _get_output_path {
     my ( $self, $object, $type ) = @_;
 
-    my $lib     = $self->library_path;
+    my $lib     = $self->config->library_path;
     my $working = $self->working_path;
 
     my $file = $object->file;
     $file =~ s/$lib/$working/;
 
     if ( $type eq 'html' ) {
-        $file =~ s/\.pm|\.md$/\.html/;
+        $file =~ s/\.pm$|\.md$/\.html/;
     }
     elsif ( $type eq 'markdown' ) {
-        $file =~ s/\.pm/\.md/;
+        $file =~ s/\.pm$/\.md/;
+    }
+    elsif ( $type eq 'pod' ) {
+        $file =~ s/\.pm$|\.md$/\.pod/;
     }
 
     return ( path($file)->parent->canonpath, $file );
@@ -216,13 +175,20 @@ sub _get_output_path {
 ###     use File::Find;
 ###     use Path::Tiny;
 ###
-###     my $dir = Path::Tiny->tempdir->canonpath;
+###     use Perl::Gib::Config;
 ###
-###     my $perlgib = Perl::Gib->new({output_path => $dir});
+###     my $dir = Path::Tiny->tempdir;
+###
+###     Perl::Gib::Config->initialize(output_path => $dir);
+###
+###     my $perlgib = Perl::Gib->new();
 ###     $perlgib->html();
 ###
 ###     my @wanted = (
 ###         path( $dir, "Perl/Gib.html" ),
+###         path( $dir, "Perl/Gib/App.html" ),
+###         path( $dir, "Perl/Gib/App/CLI.html" ),
+###         path( $dir, "Perl/Gib/Config.html" ),
 ###         path( $dir, "Perl/Gib/Markdown.html" ),
 ###         path( $dir, "Perl/Gib/Module.html" ),
 ###         path( $dir, "Perl/Gib/Template.html" ),
@@ -235,19 +201,21 @@ sub _get_output_path {
 ###     @docs = sort @docs;
 ###
 ###     is_deeply( \@docs, \@wanted, 'all docs generated' );
+###
+###     $dir->remove_tree( { safe => 0 } );
+###
+###     Perl::Gib::Config->_clear_instance();
 ### ```
 sub html {
     my $self = shift;
 
     $self->working_path->mkpath;
 
-    if ( !$self->no_html_index ) {
+    if ( !$self->config->no_html_index ) {
 
         my $index = Perl::Gib::Index->new(
-            modules      => $self->modules,
-            markdowns    => $self->markdowns,
-            library_path => $self->library_path,
-            library_name => $self->library_name,
+            modules   => $self->modules,
+            markdowns => $self->markdowns,
         );
 
         my $template = $self->_get_resource_path('lib:templates:index');
@@ -278,7 +246,7 @@ sub html {
         $self->_get_resource_path('lib:assets'),
         $self->_get_resource_path('out:assets')
     );
-    dirmove( $self->working_path, $self->output_path );
+    dirmove( $self->working_path, $self->config->output_path );
 
     return;
 }
@@ -288,7 +256,7 @@ sub test {
     my $self = shift;
 
     foreach my $module ( @{ $self->modules } ) {
-        $module->run_test( $self->library_path );
+        $module->run_test( $self->config->library_path );
     }
 
     return;
@@ -299,13 +267,20 @@ sub test {
 ###     use File::Find;
 ###     use Path::Tiny;
 ###
-###     my $dir = Path::Tiny->tempdir->canonpath;
+###     use Perl::Gib::Config;
 ###
-###     my $perlgib = Perl::Gib->new({output_path => $dir});
+###     my $dir = Path::Tiny->tempdir;
+###
+###     Perl::Gib::Config->new(output_path => $dir);
+###
+###     my $perlgib = Perl::Gib->new();
 ###     $perlgib->markdown();
 ###
 ###     my @wanted = (
 ###         path( $dir, "Perl/Gib.md" ),
+###         path( $dir, "Perl/Gib/App.md" ),
+###         path( $dir, "Perl/Gib/App/CLI.md" ),
+###         path( $dir, "Perl/Gib/Config.md" ),
 ###         path( $dir, "Perl/Gib/Markdown.md" ),
 ###         path( $dir, "Perl/Gib/Module.md" ),
 ###         path( $dir, "Perl/Gib/Template.md" ),
@@ -317,6 +292,10 @@ sub test {
 ###     @docs = sort @docs;
 ###
 ###     is_deeply( \@docs, \@wanted, 'all docs generated' );
+###
+###     $dir->remove_tree( { safe => 0 } );
+###
+###     Perl::Gib::Config->_clear_instance();
 ### ```
 sub markdown {
     my $self = shift;
@@ -330,7 +309,59 @@ sub markdown {
         path($file)->spew( $object->to_markdown() );
     }
 
-    dirmove( $self->working_path, $self->output_path );
+    dirmove( $self->working_path, $self->config->output_path );
+
+    return;
+}
+
+### Create output directory, generate Pod content and write it to files.
+### ```
+###     use File::Find;
+###     use Path::Tiny;
+###
+###     use Perl::Gib::Config;
+###
+###     my $dir = Path::Tiny->tempdir;
+###
+###     Perl::Gib::Config->new(output_path => $dir);
+###
+###     my $perlgib = Perl::Gib->new();
+###     $perlgib->pod();
+###
+###     my @wanted = (
+###         path( $dir, "Perl/Gib.pod" ),
+###         path( $dir, "Perl/Gib/App.pod" ),
+###         path( $dir, "Perl/Gib/App/CLI.pod" ),
+###         path( $dir, "Perl/Gib/Config.pod" ),
+###         path( $dir, "Perl/Gib/Markdown.pod" ),
+###         path( $dir, "Perl/Gib/Module.pod" ),
+###         path( $dir, "Perl/Gib/Template.pod" ),
+###         path( $dir, "Perl/Gib/Usage.pod" ),
+###     );
+###
+###     my @docs;
+###     find( sub { push @docs, $File::Find::name if ( -f && /\.pod$/ ); }, $dir );
+###     @docs = sort @docs;
+###
+###     is_deeply( \@docs, \@wanted, 'all docs generated' );
+###
+###     $dir->remove_tree( { safe => 0 } );
+###
+###     Perl::Gib::Config->_clear_instance();
+### ```
+sub pod {
+    my $self = shift;
+
+    $self->working_path->mkpath;
+
+    foreach my $object ( @{ $self->modules }, @{ $self->markdowns } ) {
+        my ( $dir, $file ) = $self->_get_output_path( $object, 'pod' );
+
+        path($dir)->mkpath;
+        path($file)->spew( $object->to_pod() );
+    }
+
+    dirmove( $self->working_path, $self->config->output_path );
 
     return;
 }

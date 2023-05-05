@@ -10,7 +10,7 @@ use warnings;
 use Moose;
 with qw(Perl::Gib::Item);
 
-use Carp qw(croak);
+use Perl::Gib::Util qw(throw_exception);
 
 no warnings "uninitialized";
 
@@ -21,7 +21,7 @@ sub _build_statement {
     return $self->fragment->[0]->namespace;
 }
 
-### Create item description string by parsing comment block. By default 
+### Create item description string by parsing comment block. By default
 ### packages starting with a pseudo function `#[ignore(item)]` in comment
 ### block are ignored; the class will croak.
 sub _build_description {
@@ -31,9 +31,8 @@ sub _build_description {
     shift @fragment;
 
     if ( $fragment[0] =~ /#\[ignore\(item\)\]/ ) {
-        croak( sprintf "Package / Module ignored by comment: %s",
-            $self->statement )
-          if ( !$self->document_ignored_items );
+        throw_exception( 'PackageIsIgnoredByComment', name => $self->statement )
+          if ( !$self->config->document_ignored_items );
 
         shift @fragment;
     }
@@ -45,6 +44,9 @@ sub _build_description {
     }
 
     $description =~ s/\s+$//g;
+
+    throw_exception( 'PackageIsUndocumented', name => $self->statement )
+      if ( $self->config->ignore_undocumented_items && !$description );
 
     return $description;
 }
